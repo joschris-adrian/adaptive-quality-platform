@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-config
+  namespace: adaptive-quality
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  DATABASE_URL:            "postgresql://aqp:aqp_secret@postgres:5432/adaptive_quality"
+  SNAPSHOT_INTERVAL_SECONDS: "900"
+  REPORT_OUTPUT_DIR:       "reports"
+  LOG_LEVEL:               "INFO"

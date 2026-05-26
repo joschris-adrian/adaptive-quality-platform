@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: PostgreSQL
+    type: postgres
+    uid: PCC52D03280B7034C
+    orgId: 1
+    url: 172.19.0.3:5432
+    user: aqp
+    database: adaptive_quality
+    basicAuth: false
+    isDefault: true
+    editable: true
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1500
+      timescaledb: false
+    secureJsonData:
+      password: aqp_secret

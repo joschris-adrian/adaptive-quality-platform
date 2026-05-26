@@ -1,0 +1,157 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "title": "Operational Dashboard",
+  "uid": "operational-001",
+  "tags": ["adaptive-quality", "operational"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Event Volume (events/min)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT DATE_TRUNC('minute', created_at) AS time, COUNT(*) AS value, tier AS metric FROM decisions WHERE created_at >= $__timeFrom() AND created_at <= $__timeTo() GROUP BY time, tier ORDER BY time",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } }
+    },
+    {
+      "id": 2,
+      "title": "Queue Backlog by Tier",
+      "type": "bargauge",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT tier AS metric, COUNT(*) FILTER (WHERE reviewed_at IS NULL) AS value FROM decisions GROUP BY tier",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "displayMode": "gradient"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0   },
+              { "color": "yellow", "value": 100 },
+              { "color": "red",    "value": 500 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Decision Latency p50/p95 (minutes)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT DATE_TRUNC('minute', created_at) AS time, PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (reviewed_at - created_at)) / 60) AS p50, PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (reviewed_at - created_at)) / 60) AS p95 FROM decisions WHERE reviewed_at IS NOT NULL AND created_at >= $__timeFrom() AND created_at <= $__timeTo() GROUP BY time ORDER BY time",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Oldest Pending Event (minutes)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 8, "w": 6, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT MAX(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60) AS value FROM decisions WHERE reviewed_at IS NULL",
+          "format": "table"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0  },
+              { "color": "yellow", "value": 30 },
+              { "color": "red",    "value": 60 }
+            ]
+          },
+          "unit": "m"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Throughput (decisions/hour)",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS value FROM decisions WHERE created_at >= NOW() - INTERVAL '1 hour'",
+          "format": "table"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
+    },
+    {
+      "id": 6,
+      "title": "Action Distribution",
+      "type": "piechart",
+      "gridPos": { "x": 0, "y": 16, "w": 8, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT tier AS metric, COUNT(*) AS value FROM decisions WHERE created_at >= $__timeFrom() GROUP BY tier",
+          "format": "table"
+        }
+      ],
+      "options": { "pieType": "donut", "legendDisplayMode": "table" }
+    },
+    {
+      "id": 7,
+      "title": "Escalation Rate Over Time",
+      "type": "timeseries",
+      "gridPos": { "x": 8, "y": 16, "w": 16, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT DATE_TRUNC('hour', created_at) AS time, ROUND(AVG(escalated::int)::numeric, 4) AS value FROM decisions WHERE created_at >= $__timeFrom() AND created_at <= $__timeTo() GROUP BY time ORDER BY time",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0    },
+              { "color": "yellow", "value": 0.20 },
+              { "color": "red",    "value": 0.40 }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+severity:
+  fraud:            1.0
+  policy_violation: 0.85
+  abuse:            0.75
+  spam:             0.55
+  anomaly:          0.45
+  unknown:          0.35
+  clean:            0.05
+
+exposure:
+  event_type:
+    transaction:         0.9
+    moderation_decision: 0.7
+    review_outcome:      0.6
+    user_action:         0.4
+    operational_alert:   0.3
+
+  source_system:
+    api:    0.8
+    mobile: 0.5
+    web:    0.4
+
+priority_thresholds:
+  critical: 0.85
+  high:     0.65
+  medium:   0.40
+  # anything below medium = low

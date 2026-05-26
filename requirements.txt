@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+kafka-python
+psycopg2-binary
+pydantic
+pyyaml
+joblib
+numpy
+pytest
+pytest-asyncio
+pytest-cov

@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: snapshot-writer
+  namespace: adaptive-quality
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: snapshot-writer
+              image: adaptive-quality/analytics:latest
+              command: ["python", "-m", "scripts.run_snapshot"]
+              envFrom:
+                - configMapRef:
+                    name: platform-config
+                - secretRef:
+                    name: platform-secrets
+              resources:
+                requests:
+                  cpu:    "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu:    "200m"
+                  memory: "256Mi"

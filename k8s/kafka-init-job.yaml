@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init
+  namespace: adaptive-quality
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-init
+          image: bitnami/kafka:3.7
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Waiting for Kafka..."
+              until kafka-topics.sh --bootstrap-server kafka:9092 --list; do
+                sleep 5
+              done
+
+              create_topic() {
+                kafka-topics.sh \
+                  --bootstrap-server kafka:9092 \
+                  --create --if-not-exists \
+                  --topic "$1" \
+                  --partitions "$2" \
+                  --replication-factor 1 \
+                  --config retention.ms="$3"
+              }
+
+              create_topic raw-events              6 604800000
+              create_topic scored-events           6 604800000
+              create_topic review-queue            3 604800000
+              create_topic auto-actioned-events    3 604800000
+              create_topic routed-decisions        3 604800000
+              create_topic review-outcomes         3 604800000
+              create_topic dlq-events              2 2592000000
+
+              echo "All topics created."
+              kafka-topics.sh --bootstrap-server kafka:9092 --list

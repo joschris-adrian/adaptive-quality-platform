@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-scoring
+  namespace: adaptive-quality
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: risk-scoring
+  template:
+    metadata:
+      labels:
+        app: risk-scoring
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8002"
+        prometheus.io/path:   "/metrics"
+    spec:
+      containers:
+        - name: risk-scoring
+          image: adaptive-quality/risk-scoring:latest
+          command: ["python", "-m", "services.risk_scoring.consumer"]
+          ports:
+            - containerPort: 8002
+          envFrom:
+            - configMapRef:
+                name: platform-config
+            - secretRef:
+                name: platform-secrets
+          volumeMounts:
+            - name: weights-config
+              mountPath: /app/services/risk_scoring/weights.yaml
+              subPath: weights.yaml
+          resources:
+            requests:
+              cpu:    "250m"
+              memory: "256Mi"
+            limits:
+              cpu:    "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8002
+            initialDelaySeconds: 15
+            periodSeconds:       10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8002
+            initialDelaySeconds: 5
+            periodSeconds:       5
+      volumes:
+        - name: weights-config
+          configMap:
+            name: risk-scoring-weights
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: risk-scoring
+  namespace: adaptive-quality
+spec:
+  selector:
+    app: risk-scoring
+  ports:
+    - port: 8002
+      targetPort: 8002
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: risk-scoring-hpa
+  namespace: adaptive-quality
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: risk-scoring
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type:               Utilization
+          averageUtilization: 70
+    - type: External
+      external:
+        metric:
+          name: kafka_consumer_lag
+          selector:
+            matchLabels:
+              topic: scored-events
+              group: risk-scoring-service
+        target:
+          type:         AverageValue
+          averageValue: "500"

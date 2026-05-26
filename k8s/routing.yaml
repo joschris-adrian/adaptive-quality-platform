@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: routing
+  namespace: adaptive-quality
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: routing
+  template:
+    metadata:
+      labels:
+        app: routing
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8003"
+        prometheus.io/path:   "/metrics"
+    spec:
+      containers:
+        - name: routing
+          image: adaptive-quality/routing:latest
+          command: ["python", "-m", "services.routing.consumer"]
+          ports:
+            - containerPort: 8003
+          envFrom:
+            - configMapRef:
+                name: platform-config
+            - secretRef:
+                name: platform-secrets
+          resources:
+            requests:
+              cpu:    "100m"
+              memory: "256Mi"
+            limits:
+              cpu:    "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8003
+            initialDelaySeconds: 15
+            periodSeconds:       10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8003
+            initialDelaySeconds: 5
+            periodSeconds:       5
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: routing
+  namespace: adaptive-quality
+spec:
+  selector:
+    app: routing
+  ports:
+    - port: 8003
+      targetPort: 8003
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: routing-hpa
+  namespace: adaptive-quality
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: routing
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type:               Utilization
+          averageUtilization: 70
+    - type: External
+      external:
+        metric:
+          name: kafka_consumer_lag
+          selector:
+            matchLabels:
+              topic: review-queue
+              group: routing-service
+        target:
+          type:         AverageValue
+          averageValue: "200"

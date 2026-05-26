@@ -1,0 +1,24 @@
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: detection-service
+    static_configs:
+      - targets: ["detection:8001"]
+
+  - job_name: risk-scoring-service
+    static_configs:
+      - targets: ["risk-scoring:8002"]
+
+  - job_name: routing-service
+    static_configs:
+      - targets: ["routing:8003"]
+
+  - job_name: analytics-service
+    static_configs:
+      - targets: ["analytics:8004"]
+
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: ["kafka-exporter:9308"]

@@ -1,0 +1,18 @@
+topics:
+  - name: raw-events
+    partitions: 6
+    replication_factor: 2
+    retention_ms: 604800000   # 7 days
+
+  - name: scored-events
+    partitions: 6
+    replication_factor: 2
+
+  - name: review-queue
+    partitions: 3
+    replication_factor: 2
+
+  - name: dlq-events
+    partitions: 2
+    replication_factor: 2
+    retention_ms: 2592000000  # 30 days for investigation
