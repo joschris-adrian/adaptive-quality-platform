@@ -1,3 +1,5 @@
+CREATE DATABASE IF NOT EXISTS mlflow;
+
 -- ── decisions ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS decisions (
     id              BIGSERIAL PRIMARY KEY,

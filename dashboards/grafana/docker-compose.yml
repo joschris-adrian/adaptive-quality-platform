@@ -88,6 +88,27 @@ services:
       "
     networks:
       - platform
+    
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+      - MLFLOW_ARTIFACT_ROOT=/mlruns
+    volumes:
+      - ./mlruns:/mlruns
+    depends_on:
+      - postgres
+    networks:
+      - grafana_default
+      - grafana_platform
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+      --default-artifact-root /mlruns
+      --host 0.0.0.0
+      --port 5000
 
 volumes:
   grafana_data:
@@ -97,3 +118,7 @@ volumes:
 networks:
   platform:
     driver: bridge
+  grafana_default:
+    external: true
+  grafana_platform:
+    external: true

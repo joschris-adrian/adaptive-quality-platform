@@ -1,10 +1,18 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from services.analytics.comparison     import QualityCostComparator, STRATEGIES
+
+import threading
+from services.analytics.comparison      import QualityCostComparator, STRATEGIES
 from services.analytics.experimentation import ExperimentEngine
 
 TOTAL_EVENTS = 10_000
 BUDGET       = 3_000.0
+
+steps = ["Strategy comparison", "Threshold sweep", "Budget experiment", "Logging to MLflow", "Done"]
+
+def _progress(i, label):
+    pct = int(i / len(steps) * 40)
+    print(f"\r[{'█' * pct}{'░' * (40 - pct)}] {i}/{len(steps)} {label:<25}", end="", flush=True)
 
 
 def run_strategy_comparison(total_events: int) -> dict:
@@ -14,10 +22,7 @@ def run_strategy_comparison(total_events: int) -> dict:
     return result
 
 
-def run_threshold_sweep(
-    total_events: int,
-    thresholds:   list[float] = None,
-) -> dict:
+def run_threshold_sweep(total_events: int, thresholds: list[float] = None) -> dict:
     thresholds = thresholds or [0.50, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
     engine     = ExperimentEngine()
     return engine.threshold_experiment(
@@ -32,33 +37,75 @@ def run_budget_experiment(total_events: int, budget: float) -> list:
     return comparator.cost_under_budget(total_events, budget)
 
 
-def run_all(
-    total_events: int = TOTAL_EVENTS,
-    budget:       float = BUDGET,
-) -> dict:
-    strategy   = run_strategy_comparison(total_events)
-    threshold  = run_threshold_sweep(total_events)
+def run_all(total_events: int = TOTAL_EVENTS, budget: float = BUDGET) -> dict:
+    _progress(0, "Starting...")
+
+    strategy = run_strategy_comparison(total_events)
+    _progress(1, steps[0])
+
+    threshold = run_threshold_sweep(total_events)
+    _progress(2, steps[1])
+
     affordable = run_budget_experiment(total_events, budget)
+    _progress(3, steps[2])
 
     strategies = strategy["strategies"]
     auto       = strategies["automation_only"]
     hybrid     = strategies["hybrid_balanced"]
 
-    return {
+    results = {
         "strategy_comparison": strategy,
         "threshold_sweep":     threshold,
         "budget_experiment":   affordable,
         "summary": {
-            "quality_gain_hybrid_vs_auto":  round(
-                hybrid["quality_score"] - auto["quality_score"], 4
-            ),
-            "cost_increase_hybrid_vs_auto": round(
-                hybrid["total_cost"] - auto["total_cost"], 2
-            ),
+            "quality_gain_hybrid_vs_auto":  round(hybrid["quality_score"] - auto["quality_score"], 4),
+            "cost_increase_hybrid_vs_auto": round(hybrid["total_cost"] - auto["total_cost"], 2),
             "optimal_threshold":            threshold["optimal"]["escalate_threshold"],
             "best_affordable_strategy":     affordable[0]["name"] if affordable else None,
         },
     }
+
+    def _log():
+        try:
+            from services.mlflow.tracking import log_experiment_run, log_threshold_sweep
+            for name, data in strategy["strategies"].items():
+                log_experiment_run(
+                    experiment_name="platform-experiments",
+                    run_name=name,
+                    params={"strategy": name, "total_events": total_events},
+                    metrics={
+                        "quality": data["quality_score"],
+                        "cost": data["total_cost"],
+                        "efficiency_ratio": data["efficiency_ratio"],
+                    },
+                )
+            for row in threshold["results"]:
+                log_threshold_sweep(
+                    threshold=row["escalate_threshold"],
+                    results={
+                        "quality": row["quality_score"],
+                        "cost": row["total_cost"],
+                        "auto_pct": row["tier_split"]["automated"],
+                    },
+                )
+            for s in affordable:
+                log_experiment_run(
+                    experiment_name="platform-experiments",
+                    run_name=f"budget_{s['name']}",
+                    params={"strategy": s["name"], "budget": budget, "total_events": total_events},
+                    metrics={"quality": s["quality_score"], "cost": s["total_cost"]},
+                    tags={"experiment": "budget-constrained"},
+                )
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_log, daemon=False)
+    t.start()
+    t.join(timeout=30)
+    _progress(4, steps[3])
+    print()
+
+    return results
 
 
 if __name__ == "__main__":

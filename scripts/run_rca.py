@@ -3,10 +3,17 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import json
+import threading
 from services.rca.root_cause import RCAEngine
 from services.rca.similarity import nearest_neighbours, similarity_clusters
 
 engine = RCAEngine()
+
+steps = ["Recording failures", "Running report", "Logging to MLflow", "Done"]
+
+def _progress(i, label):
+    pct = int(i / len(steps) * 40)
+    print(f"\r[{'█' * pct}{'░' * (40 - pct)}] {i}/{len(steps)} {label:<25}", end="", flush=True)
 
 FAILURES = [
     {
@@ -84,6 +91,8 @@ FAILURES = [
     },
 ]
 
+_progress(0, "Starting...")
+
 for f in FAILURES:
     engine.record_failure(
         event_id=     f["event_id"],
@@ -95,7 +104,24 @@ for f in FAILURES:
         reviewer_id=  f.get("reviewer_id"),
     )
 
+_progress(1, steps[0])
+
 report = engine.report()
+
+_progress(2, steps[1])
+
+def _log():
+    try:
+        from services.mlflow.tracking import log_drift_snapshot
+        log_drift_snapshot(report["trend"])
+    except Exception:
+        pass
+
+t = threading.Thread(target=_log, daemon=False)
+t.start()
+t.join(timeout=30)
+_progress(3, steps[2])
+print()
 
 print("=" * 60)
 print("RCA Report")

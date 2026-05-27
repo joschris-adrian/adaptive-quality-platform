@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: adaptive-quality
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      containers:
+        - name: mlflow
+          image: ghcr.io/mlflow/mlflow:latest
+          ports:
+            - containerPort: 5000
+          env:
+            - name: MLFLOW_BACKEND_STORE_URI
+              valueFrom:
+                secretKeyRef:
+                  name: adaptive-quality-secret
+                  key: MLFLOW_BACKEND_STORE_URI
+          args:
+            - mlflow
+            - server
+            - --backend-store-uri
+            - $(MLFLOW_BACKEND_STORE_URI)
+            - --default-artifact-root
+            - /mlruns
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "5000"
+          volumeMounts:
+            - name: mlruns
+              mountPath: /mlruns
+      volumes:
+        - name: mlruns
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: adaptive-quality
+spec:
+  selector:
+    app: mlflow
+  ports:
+    - port: 5000
+      targetPort: 5000

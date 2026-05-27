@@ -117,6 +117,7 @@ RCA + Trend Detection + Reporting
 | Orchestration     | Kubernetes + KEDA                 |
 | Language          | Python 3.13                       |
 | Testing           | pytest + pytest-asyncio           |
+| Experiment tracking  | MLflow 2.x                        |
 
 ---
 
@@ -170,6 +171,11 @@ adaptive-quality-platform/
 │   │   ├── db.py
 │   │   └── repository.py
 │   │
+│   ├── mlflow/
+│   │   ├── __init__.py
+│   │   ├── tracking.py
+│   │   └── registry.py
+│   │
 │   └── rca/
 │       ├── root_cause.py
 │       ├── similarity.py
@@ -212,6 +218,7 @@ adaptive-quality-platform/
 │   ├── routing.yaml
 │   ├── analytics.yaml
 │   ├── api.yaml
+│   ├── mlflow.yaml
 │   ├── snapshot-cronjob.yaml
 │   ├── keda-scaledobjects.yaml
 │   └── Dockerfile
@@ -222,6 +229,7 @@ adaptive-quality-platform/
 │   ├── simulate_scoring.py
 │   ├── run_comparison.py
 │   ├── run_rca.py
+│   ├── train_classifier.py
 │   ├── run_report.py
 │   ├── run_ab_experiment.py
 │   ├── run_platform_experiments.py
@@ -247,7 +255,13 @@ adaptive-quality-platform/
     ├── test_run_platform_experiments.py
     ├── test_run_rca.py
     ├── test_synthetic_data_generator.py
-    ├── test_seed_database.py         
+    ├── test_seed_database.py  
+    ├── test_mlflow_tracking.py
+    ├── test_mlflow_registry.py
+    ├── test_train_classifier.py
+    ├── test_mlflow_tracking_integration.py
+    ├── test_run_rca_script.py
+    ├── test_run_ab_experiment_script.py       
     └── test_run_py.py
     ---
 
@@ -277,6 +291,10 @@ python run.py up
 
 # initialise the database schema
 python run.py init-db
+
+python run.py mlflow-up      # start MLflow tracking server (http://localhost:5000)
+python run.py mlflow-down    # stop MLflow server
+python run.py train          # train classifier and log to MLflow
 
 # run all tests
 python run.py test
@@ -746,7 +764,7 @@ python run.py k8s-status
 
 ---
 
-## 16. Hardware-Aware Optimisation
+## 16a. Hardware-Aware Optimisation
 
 This section demonstrates throughput and latency tradeoffs achievable
 without specialised hardware.
@@ -769,20 +787,59 @@ after which gains flatten due to event-loop scheduling overhead.
 | 50         | ~2,000               | ~0.5                   |
 | 200        | ~4,500               | ~0.22                  |
 
-**Consumer parallelism:**
+**Consumer parallelism:**a local development environment. The async and
+batching patterns demon
 
 Kafka consumer groups allow horizontal scaling by replica count. KEDA
 ScaledObjects autoscale based on topic lag — the practical equivalent of
 accelerator-aware scheduling for this workload type.
 
 GPU inference and multi-node benchmarks are excluded as they require
-hardware not available in a local development environment. The async and
-batching patterns demonstrated here apply directly to GPU-backed inference
+hardware not available in strated here apply directly to GPU-backed inference
 servers such as Triton when the platform is deployed to cloud infrastructure.
 
 ```bash
 python run.py bench
 ```
+
+## 16b. MLflow Integration
+
+MLflow tracks all experiments, model training runs, and drift snapshots persistently.
+
+**Experiments logged:**
+
+| Experiment              | Script                              | Metrics logged                          |
+|-------------------------|-------------------------------------|-----------------------------------------|
+| `platform-experiments`  | `run_platform_experiments.py`       | quality, cost, efficiency_ratio         |
+| `threshold-sweep`       | `run_platform_experiments.py`       | quality, cost, auto_pct, threshold      |
+| `ab-routing-strategy`   | `run_ab_experiment.py`              | precision, cost_per_event, reversal_rate|
+| `drift-monitoring`      | `run_rca.py`                        | precision_delta, recall_delta, emerging_categories_count |
+| `classifier-training`   | `train_classifier.py`               | precision, recall, f1                   |
+
+**Model registry:**
+
+The ML classifier is registered under `risk-classifier` and promoted through `Staging → Production`. The routing engine loads the `Production` version by stage name, not by hardcoded weights.
+
+**Start MLflow:**
+
+\```bash
+python run.py mlflow-up
+# MLflow UI → http://localhost:5000
+\```
+
+**Train and register the classifier:**
+
+\```bash
+python run.py train
+\```
+
+**New files added:**
+
+| File                            | Purpose                                      |
+|---------------------------------|----------------------------------------------|
+| `services/mlflow/tracking.py`   | Thin wrapper around mlflow logging calls     |
+| `services/mlflow/registry.py`   | Model registration and stage promotion       |
+| `scripts/train_classifier.py`   | Train classifier, log to MLflow, register    |
 
 ---
 
@@ -934,11 +991,20 @@ python run.py rca
 python run.py ab-experiment
 ```
 
-### Step 8 — Run all four key experiments
+### Step 8a — Run all four key experiments
 
 ```bash
 python run.py platform-experiments
 ```
+
+### Step 8b — View experiment results in MLflow
+
+Open MLflow at `http://localhost:5000`.
+
+- **platform-experiments** — strategy comparison and threshold sweep runs
+- **ab-routing-strategy** — control vs treatment variant metrics
+- **drift-monitoring** — RCA drift snapshots
+- **classifier-training** — model versions with precision/recall/F1
 
 ### Step 9 — Generate a report
 
@@ -1097,35 +1163,47 @@ as pure in-memory classes with Kafka consumers as thin wrappers means
 every method is unit-testable with no database, no Kafka broker, and no
 mocking of infrastructure. 
 
+**Lazy imports are essential for scripts that use heavy SDKs as side effects.**
+MLflow's import chain pulls in pandas, polars, numpy, scipy, pyarrow, fastapi, and IPython — adding over 3 seconds to any script that imports it at module level. Moving the import inside the function that actually uses it, and running that function in a background thread, keeps script startup instant and progress bars responsive.
+
+**Daemon threads are silently killed when the main process exits.**
+Using `daemon=True` on the MLflow logging thread means it gets killed before finishing if the script exits quickly. Setting `daemon=False` and calling `t.join(timeout=30)` ensures the run is fully written to the tracking server before the process exits.
+
+**Docker service networking requires explicit network membership.**
+A new container added to an existing compose stack does not automatically join the networks of sibling services. Hostname resolution between containers only works when both are on the same Docker network. Declaring external networks explicitly in the compose file and assigning both services to the same network is the correct fix.
+
 ---
 
 ## 24. Next Steps
 
-- Make risk thresholds configurable via environment variables in addition to `weights.yaml`  
-- Add source-level evidence and decision explanations directly into RCA and analytics reports  
+- Make risk thresholds configurable via environment variables in addition to weights.yaml  
+- Add API authentication for production-style local deployments and testing  
 - Monitoring and observability — add structured logging, latency metrics, queue timing, and per-service performance dashboards  
+- Add traceability and audit logging for reviewer actions and policy changes  
 - Error recovery — implement checkpointed consumer recovery and safe replay handling for failed processing stages  
 - Latency optimisation — parallelise detector execution further and cache repeated enrichment/scoring lookups with a short TTL  
-- Add API authentication for production-style local deployments and testing  
+- Add explainable AI outputs showing which rules, heuristics, and detector signals contributed most to each risk score  
+- Add source-level evidence and decision explanations directly into RCA and analytics reports  
 - Add reviewer performance analytics including disagreement tracking and workload balancing  
 - Expand the evaluation framework to separately measure routing quality, escalation quality, reviewer consistency, and business impact  
-- Add traceability and audit logging for scoring signals, routing decisions, and reviewer actions  
-- Add explainable AI outputs showing which rules, heuristics, and detector signals contributed most to each risk score  
-- Replace the placeholder classifier with a stronger locally runnable model trained on larger synthetic or labelled datasets  
-- Add active learning pipelines where reviewer outcomes automatically generate retraining datasets  
-- Add multilingual event support for moderation-style payloads before scoring and routing  
-- Advanced feature engineering — move from static heuristics to temporal and behavioural feature aggregation  
-- Add hallucination/over-escalation reduction by validating detector outputs against historical reviewer outcomes  
 - Add policy simulation and replay tooling to validate threshold changes against historical traffic  
 - Visualise escalation flows, reviewer queues, and RCA clusters in a local Streamlit UI  
+- Replace the placeholder classifier with a stronger model trained on larger synthetic or labelled datasets  
+- Advanced feature engineering — move from static heuristics to temporal and behavioural feature aggregation  
+- Add hallucination/over-escalation reduction by validating detector outputs against historical reviewer outcomes  
+- Add active learning pipelines where reviewer outcomes automatically generate retraining datasets  
+- Add online drift adaptation with automatic retraining triggers  
+- Add multilingual event support for moderation-style payloads before scoring and routing  
+- Add PII detection and redaction before persistence into PostgreSQL or DLQs  
+- Add chaos-testing simulations for Kafka outages, lag spikes, and service recovery behaviour  
 - Add adaptive autoscaling simulations combining Kafka lag, SLA breaches, and queue age  
 - Add graph-based anomaly detection using Neo4j locally for linked-event analysis  
-- Add chaos-testing simulations for Kafka outages, lag spikes, and service recovery behaviour  
-- Introduce reinforcement-learning or preference-optimised routing strategies using reviewer outcomes as feedback  
-- Add online drift adaptation with automatic retraining triggers  
 - Extend the experimentation framework with contextual bandits instead of static A/B assignment  
+- Introduce reinforcement-learning or preference-optimised routing strategies using reviewer outcomes as feedback  
 - Add prompt-injection and adversarial-input detection for future LLM-assisted moderation workflows  
-- Add PII detection and redaction before persistence into PostgreSQL or DLQs  
+- Add MLflow model comparison across training runs with automatic promotion gating on F1 threshold  
+- Add MLflow Projects integration so each experiment run is fully reproducible from a single command  
+- Connect MLflow model registry to the routing engine so threshold changes trigger automatic remaining experiments  
 ---
 
 

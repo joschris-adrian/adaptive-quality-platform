@@ -56,6 +56,9 @@ Adaptive Quality Platform — available commands
     python run.py report               generate a platform report
     python run.py ab-experiment        run the A/B routing experiment
     python run.py platform-experiments run all four key experiments
+    python run.py mlflow-up            start MLflow tracking server
+    python run.py mlflow-down          stop MLflow server
+    python run.py train                train classifier and log to MLflow
 
   Kubernetes
     python run.py k8s-up               deploy all manifests
@@ -90,6 +93,8 @@ COMMANDS = {
             "-f", "/docker-entrypoint-initdb.d/schema.sql",
         )
     ),
+    
+    
 
     # ── tests ─────────────────────────────────────────────────────────────
     "test": lambda _: run([sys.executable, "-m", "pytest", "-v"]),
@@ -144,6 +149,14 @@ COMMANDS = {
     "platform-experiments": lambda _: run(
         [sys.executable, "scripts/run_platform_experiments.py"]
     ),
+    
+    "mlflow-up": lambda _: run(compose("up", "-d", "mlflow")),
+
+    "mlflow-down": lambda _: run(compose("stop", "mlflow")),
+
+    "train": lambda _: run(
+        [sys.executable, "scripts/train_classifier.py"]
+    ),
 
     # ── kubernetes ────────────────────────────────────────────────────────
     "k8s-up": lambda _: [
@@ -160,6 +173,7 @@ COMMANDS = {
             "routing.yaml",
             "analytics.yaml",
             "api.yaml",
+            "mlflow.yaml",
             "snapshot-cronjob.yaml",
             "keda-scaledobjects.yaml",
         ]

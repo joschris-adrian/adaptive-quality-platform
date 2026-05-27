@@ -9,3 +9,4 @@ data:
   SNAPSHOT_INTERVAL_SECONDS: "900"
   REPORT_OUTPUT_DIR:       "reports"
   LOG_LEVEL:               "INFO"
+  MLFLOW_TRACKING_URI: "http://mlflow:5000"
