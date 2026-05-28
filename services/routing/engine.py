@@ -22,7 +22,7 @@ class RoutingEngine:
         queue      = self._assign_queue(tier, category)
         sla_minutes = self._assign_sla(tier)
 
-        return {
+        decision = {
             "event_id":    risk_event["event_id"],
             "action":      action,
             "tier":        tier,
@@ -34,6 +34,12 @@ class RoutingEngine:
             "requires_human": action != "auto_action",
             "routing_metadata": self._build_metadata(risk_event, action, tier),
         }
+        try:
+            from services.opensearch.indexer import index_decision
+            index_decision(decision)
+        except Exception:
+            pass
+        return decision
 
     def _assign_tier(self, action: str, priority: str) -> str:
         return {

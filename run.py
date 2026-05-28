@@ -59,6 +59,11 @@ Adaptive Quality Platform — available commands
     python run.py mlflow-up            start MLflow tracking server
     python run.py mlflow-down          stop MLflow server
     python run.py train                train classifier and log to MLflow
+    python run.py airflow-up           start Airflow (port 8080)
+    python run.py airflow-down         stop Airflow
+    python run.py opensearch-up        start OpenSearch + Dashboards (port 9200 / 5601)
+    python run.py opensearch-down      stop OpenSearch
+    python run.py train-wandb          train classifier and log to W&B
 
   Kubernetes
     python run.py k8s-up               deploy all manifests
@@ -80,6 +85,12 @@ COMMANDS = {
     "logs": lambda _: run(compose("logs", "-f", "--tail", "50")),
 
     "ps": lambda _: run(compose("ps")),
+    
+    "airflow-up":       lambda _: run(compose("up", "-d", "airflow")),
+    "airflow-down":     lambda _: run(compose("stop", "airflow")),
+    "opensearch-up":    lambda _: run(compose("up", "-d", "opensearch", "opensearch-dashboards")),
+    "opensearch-down":  lambda _: run(compose("stop", "opensearch", "opensearch-dashboards")),
+    "train-wandb":      lambda _: run([sys.executable, "scripts/train_classifier.py", "--wandb"]),
 
     "shell-postgres": lambda _: run(
         compose("exec", "postgres", "psql", "-U", "aqp", "-d", "adaptive_quality")

@@ -42,6 +42,17 @@ class RCAEngine:
             signals=signals, reviewer_id=reviewer_id,
             metadata=metadata or {},
         ))
+        try:
+            from services.opensearch.indexer import index_rca_failure
+            index_rca_failure({
+                "event_id":    event_id,
+                "tier":        tier,
+                "category":    category,
+                "failure_type": failure_type,
+                "risk_score":  risk_score,
+            })
+        except Exception:
+            pass
 
     # ── Failure mode analysis ──────────────────────────────────────────────
 

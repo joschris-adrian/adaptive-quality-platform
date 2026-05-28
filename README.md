@@ -118,6 +118,9 @@ RCA + Trend Detection + Reporting
 | Language          | Python 3.13                       |
 | Testing           | pytest + pytest-asyncio           |
 | Experiment tracking  | MLflow 2.x                        |
+| Workflow orchestration | Apache Airflow            |
+| ML experiment tracking | Weights & Biases (W&B)    |
+| Search & observability | OpenSearch 2.x            |
 
 ---
 
@@ -175,6 +178,19 @@ adaptive-quality-platform/
 │   │   ├── __init__.py
 │   │   ├── tracking.py
 │   │   └── registry.py
+│   ├── airflow/
+│   │   ├── dags/
+│   │   │   ├── quality_snapshot_dag.py
+│   │   │   ├── rca_dag.py
+│   │   │   ├── retraining_dag.py
+│   │   │   └── report_dag.py
+│   │
+│   ├── opensearch/
+│   │   ├── client.py
+│   │   └── indexer.py
+│   │
+│   ├── wandb/
+│   │   └── tracker.py
 │   │
 │   └── rca/
 │       ├── root_cause.py
@@ -219,6 +235,8 @@ adaptive-quality-platform/
 │   ├── analytics.yaml
 │   ├── api.yaml
 │   ├── mlflow.yaml
+│   ├── airflow.yaml
+│   ├── opensearch.yaml
 │   ├── snapshot-cronjob.yaml
 │   ├── keda-scaledobjects.yaml
 │   └── Dockerfile
@@ -259,6 +277,9 @@ adaptive-quality-platform/
     ├── test_mlflow_tracking.py
     ├── test_mlflow_registry.py
     ├── test_train_classifier.py
+    ├── test_opensearch_indexer.py
+    ├── test_wandb_tracker.py
+    ├── test_airflow_dags.py
     ├── test_mlflow_tracking_integration.py
     ├── test_run_rca_script.py
     ├── test_run_ab_experiment_script.py       
@@ -315,14 +336,32 @@ All commands go through `run.py` — a pure Python script that works on
 Windows, Mac, and Linux with no additional tools required:
 
 ```bash
-python run.py help        # list all commands
-python run.py up          # start Docker stack
-python run.py down        # stop Docker stack
-python run.py api         # start FastAPI server (keep terminal open)
-python run.py seed        # send 500 synthetic events to the API
-python run.py test        # run all tests
-python run.py coverage    # tests with coverage report
-python run.py bench       # scaling benchmarks
+python run.py help              # list all commands
+python run.py up                # start Docker stack
+python run.py down              # stop Docker stack
+python run.py api               # start FastAPI server (keep terminal open)
+python run.py seed              # send 500 synthetic events to the API
+python run.py seed-db           # seed PostgreSQL directly for dashboards
+python run.py simulate-scoring  # score two test events end-to-end
+python run.py run-comparison    # quality vs cost strategy comparison
+python run.py rca               # run the RCA engine
+python run.py report            # generate a platform report
+python run.py ab-experiment     # run the A/B routing experiment
+python run.py platform-experiments # run all four key experiments
+python run.py mlflow-up         # start MLflow (http://localhost:5000)
+python run.py mlflow-down       # stop MLflow
+python run.py train             # train classifier and log to MLflow
+python run.py train-wandb       # train classifier and log to W&B
+python run.py airflow-up        # start Airflow (http://localhost:8080)
+python run.py airflow-down      # stop Airflow
+python run.py opensearch-up     # start OpenSearch + Dashboards (http://localhost:9200 / 5601)
+python run.py opensearch-down   # stop OpenSearch
+python run.py test              # run all tests
+python run.py coverage          # tests with coverage report
+python run.py bench             # scaling benchmarks
+python run.py k8s-up            # deploy all Kubernetes manifests
+python run.py k8s-status        # show pods and HPAs
+python run.py k8s-logs --svc detection  # tail logs for a service
 ```
 
 ### requirements.txt
@@ -340,6 +379,11 @@ pytest
 pytest-asyncio
 pytest-cov
 httpx
+mlflow
+scikit-learn
+opensearch-py
+wandb
+apache-airflow
 ```
 ## 5. Event Ingestion Layer
 
@@ -787,15 +831,15 @@ after which gains flatten due to event-loop scheduling overhead.
 | 50         | ~2,000               | ~0.5                   |
 | 200        | ~4,500               | ~0.22                  |
 
-**Consumer parallelism:**a local development environment. The async and
-batching patterns demon
+**Consumer parallelism:**
 
 Kafka consumer groups allow horizontal scaling by replica count. KEDA
 ScaledObjects autoscale based on topic lag — the practical equivalent of
 accelerator-aware scheduling for this workload type.
 
 GPU inference and multi-node benchmarks are excluded as they require
-hardware not available in strated here apply directly to GPU-backed inference
+hardware not available in a local development environment. The async and
+batching patterns demonstrated here apply directly to GPU-backed inference
 servers such as Triton when the platform is deployed to cloud infrastructure.
 
 ```bash
@@ -840,6 +884,55 @@ python run.py train
 | `services/mlflow/tracking.py`   | Thin wrapper around mlflow logging calls     |
 | `services/mlflow/registry.py`   | Model registration and stage promotion       |
 | `scripts/train_classifier.py`   | Train classifier, log to MLflow, register    |
+
+## 16c. Airflow Orchestration
+
+Four DAGs wrap existing Python functions with scheduling, retries, and run history:
+
+| DAG                    | Schedule        | Task                                              |
+|------------------------|-----------------|---------------------------------------------------|
+| `quality_snapshot_dag` | Every 15 min    | Replaces Kubernetes CronJob for snapshot writes   |
+| `rca_dag`              | Every hour      | Runs RCA engine, triggers alert on drift detected |
+| `retraining_dag`       | On drift signal | Fires train_classifier.py when emerging categories exceed threshold |
+| `report_dag`           | Weekly          | Generates and archives platform report            |
+
+```bash
+python run.py airflow-up     # start Airflow (port 8080)
+python run.py airflow-down   # stop Airflow
+# Airflow UI → http://localhost:8080
+```
+
+## 16d. Weights & Biases
+
+W&B is the research layer for classifier development. MLflow remains the operational tracking layer for routing strategies and threshold sweeps.
+
+| Layer       | Tool    | Tracks                                              |
+|-------------|---------|-----------------------------------------------------|
+| Operational | MLflow  | Routing strategies, threshold sweeps, drift snapshots |
+| Research    | W&B     | Classifier hyperparameter sweeps, feature engineering, FP/FN tables |
+
+```bash
+python run.py train-wandb    # train classifier and log to W&B
+```
+
+## 16e. OpenSearch
+
+Every routing decision, RCA failure record, and reviewer action is indexed in OpenSearch in addition to PostgreSQL. PostgreSQL remains the source of truth for structured queries.
+
+| Index                  | Content                                      |
+|------------------------|----------------------------------------------|
+| `decisions`            | Every routing decision with risk score       |
+| `rca_failures`         | Failure records for full-text search         |
+| `dlq_events`           | Dead-letter queue events for investigation   |
+| `review_outcomes`      | Reviewer actions and disagreements           |
+
+OpenSearch Dashboards complements Grafana for trend and quality visualisation. The built-in ML plugin runs anomaly detection on the risk score time series.
+
+```bash
+python run.py opensearch-up     # start OpenSearch + Dashboards (port 9200 / 5601)
+python run.py opensearch-down   # stop OpenSearch
+# OpenSearch Dashboards → http://localhost:5601
+```
 
 ---
 
@@ -959,10 +1052,21 @@ python run.py seed-db
 # then refresh Grafana at http://localhost:3000
 ```
 
-### Step 3 — Run the detection pipeline locally
+### Step 3a — Run the detection pipeline locally
 
 ```bash
 python run.py simulate-scoring
+```
+
+### Step 3b — Start optional services
+
+```bash
+python run.py mlflow-up
+python run.py opensearch-up
+python run.py airflow-up
+# MLflow      → http://localhost:5000
+# OpenSearch  → http://localhost:5601
+# Airflow     → http://localhost:8080
 ```
 
 ### Step 4 — View dashboards
@@ -1005,6 +1109,17 @@ Open MLflow at `http://localhost:5000`.
 - **ab-routing-strategy** — control vs treatment variant metrics
 - **drift-monitoring** — RCA drift snapshots
 - **classifier-training** — model versions with precision/recall/F1
+
+### Step 8c — View classifier experiments in W&B
+
+```bash
+python run.py train-wandb
+```
+Open your W&B project dashboard to compare runs, hyperparameters, and FP/FN tables.
+
+### Step 8d — View decisions in OpenSearch
+
+Open OpenSearch Dashboards at `http://localhost:5601`. The `decisions` and `rca_failures` indices are pre-configured with index patterns and a default dashboard showing risk score distribution and failure mode trends.
 
 ### Step 9 — Generate a report
 
@@ -1172,6 +1287,15 @@ Using `daemon=True` on the MLflow logging thread means it gets killed before fin
 **Docker service networking requires explicit network membership.**
 A new container added to an existing compose stack does not automatically join the networks of sibling services. Hostname resolution between containers only works when both are on the same Docker network. Declaring external networks explicitly in the compose file and assigning both services to the same network is the correct fix.
 
+**Separate operational and research experiment tracking.**
+Using MLflow for routing strategy and threshold experiments and W&B for classifier development keeps the two audiences — engineering ops and model research — from interfering with each other's experiment namespaces and retention policies.
+
+**Full-text search on structured data requires a separate index.**
+PostgreSQL handles structured queries well but cannot efficiently search across event payloads or correlate log entries across services. Dual-writing decisions to OpenSearch at insert time adds negligible latency and unlocks free-text search, anomaly detection, and dashboard aggregations that would require complex SQL otherwise.
+
+**Orchestration pays off earlier than expected.**
+Replacing cron-based snapshot writes with Airflow DAGs adds retry logic, dependency management, and a run history UI at the cost of one additional service. The operational visibility into whether the snapshot job succeeded — and why it failed if it didn't — is worth the complexity from the first week of production use.
+
 ---
 
 ## 24. Next Steps
@@ -1203,7 +1327,7 @@ A new container added to an existing compose stack does not automatically join t
 - Add prompt-injection and adversarial-input detection for future LLM-assisted moderation workflows  
 - Add MLflow model comparison across training runs with automatic promotion gating on F1 threshold  
 - Add MLflow Projects integration so each experiment run is fully reproducible from a single command  
-- Connect MLflow model registry to the routing engine so threshold changes trigger automatic remaining experiments  
+- Connect MLflow model registry to the routing engine so threshold changes trigger automatic retraining experiments  
 ---
 
 

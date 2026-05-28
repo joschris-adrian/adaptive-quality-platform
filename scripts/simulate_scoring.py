@@ -31,6 +31,12 @@ test_cases = [
 
 for tc in test_cases:
     result = scorer.score(tc)
+    try:
+        from services.routing.engine import RoutingEngine
+        router = RoutingEngine()
+        decision = router.route(result)
+    except Exception as e:
+        print(f"Routing/indexing error: {e}")
     print(
         f"[{result['event_id']}] "
         f"score={result['risk_score']} "

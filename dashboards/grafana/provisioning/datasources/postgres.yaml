@@ -5,7 +5,7 @@ datasources:
     type: postgres
     uid: PCC52D03280B7034C
     orgId: 1
-    url: 172.19.0.3:5432
+    url: postgres:5432
     user: aqp
     database: adaptive_quality
     basicAuth: false

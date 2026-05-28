@@ -38,6 +38,14 @@ MOCK_MODULES = [
     "psycopg2.pool",
     "prometheus_client",
     "uvicorn",
+    "opensearch-py",
+    "opensearchpy",
+    "wandb",
+    "apache-airflow",
+    "airflow",
+    "airflow.models",
+    "airflow.operators",
+    "airflow.operators.python",
 ]
 
 for mod in MOCK_MODULES:
